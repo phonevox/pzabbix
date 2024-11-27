@@ -44,7 +44,20 @@ COLORS_ARRAY=(
 # returns "ID"+"VERSION_ID" from /etc/os-release
 # Usage: OS=$(get_os)
 function get_os() {
-    echo "$(echo $(grep -oP '(?<=^ID=).+' /etc/os-release | tr -d '"') $(grep -oP '(?<=^VERSION_ID=).+' /etc/os-release | tr -d '"') | tr '[:upper:]' '[:lower:]')"
+
+    local INFO=$(echo $(get_os_info "ID") $(get_os_info "VERSION_ID") | tr -d '"' | tr '[:upper:]' '[:lower:]')
+    echo $INFO
+
+    # echo "$(echo $(grep -oP '(?<=^ID=).+' /etc/os-release | tr -d '"') $(grep -oP '(?<=^VERSION_ID=).+' /etc/os-release | tr -d '"') | tr '[:upper:]' '[:lower:]')"
+}
+
+# returns information from /etc/os-release
+# call in subshell and store the echo'ed value in a variable
+# Usage: OS_ID=$(get_os_info "ID")
+function get_os_info() {
+    FIELD=$1
+    if [[ -z "$FIELD" ]]; then return 1; fi
+    echo "$(echo $(grep -oP "(?<=^$FIELD=).+" /etc/os-release | tr -d '"'))"
 }
 
 # color your text using subshells

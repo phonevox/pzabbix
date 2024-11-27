@@ -17,7 +17,9 @@ source $CURRDIR/lib/easyflags.sh
 source $CURRDIR/lib/versioncontrol.sh
 
 # Additional information
-SYSTEM_OS=$(get_os)
+SYSTEM_ID=$(get_os_info "ID") #centos|rocky|debian|ubuntu
+SYSTEM_VERSION=$(get_os_info "VERSION_ID") # 7|8.0|18|22 etc... (version number)
+SYSTEM_OS="$SYSTEM_ID-$SYSTEM_VERSION" # centos-7|rocky-8.0 etc...
 
 # === FLAGS BELOW ===
 
@@ -32,7 +34,7 @@ add_flag "sa" "server-active" "Zabbix: ServerActive" ip/domain
 add_flag "s" "server" "Zabbix: Server" ip/domain
 add_flag "S" "S" "Zabbix: ServerActive and Server" ip/domain
 add_flag "H" "hostname" "Zabbix: Hostname" string
-add_flag "mtdt" "metadata" "Zabbix: HostMetadata, maximum of 255 characters" string
+add_flag "m" "metadata" "Zabbix: HostMetadata, maximum of 255 characters" string
 
 # quick server location
 add_flag "ovh:HIDDEN" "ovh" "Phonevox: Metadata OVH" bool
@@ -67,7 +69,7 @@ hasFlag "s" && ZABBIX_SERVER=$(getFlag "s")
 hasFlag "sa" && ZABBIX_SERVER_ACTIVE=$(getFlag "sa")
 hasFlag "S" && ZABBIX_SERVER=$(getFlag "S"); ZABBIX_SERVER_ACTIVE=$ZABBIX_SERVER
 hasFlag "H" && ZABBIX_HOSTNAME=$(getFlag "H")
-hasFlag "mtdt" && ZABBIX_METADATA=$(getFlag "mtdt")
+hasFlag "m" && ZABBIX_METADATA=$(getFlag "m")
 
 (
 $_DRY && (echo "Dry mode is enabled.") || (echo "Dry mode is disabled.")
@@ -294,11 +296,14 @@ function post_install() {
 function run_test() {
     echo "--- RUNNING TEST"
     
-    echo "Zabbix information: "
-    echo "Server: $ZABBIX_SERVER"
-    echo "ServerActive: $ZABBIX_SERVER_ACTIVE"
-    echo "Hostname: $ZABBIX_HOSTNAME"
-    echo "HostMetadata: $ZABBIX_METADATA"
+    echo "    --- Zabbix information --- "
+    echo "Server        : $ZABBIX_SERVER"
+    echo "ServerActive  : $ZABBIX_SERVER_ACTIVE"
+    echo "Hostname      : $ZABBIX_HOSTNAME"
+    echo "HostMetadata  : $ZABBIX_METADATA"
+    echo "OS            : $(get_os)"
+    echo "OS INFO       : $(get_os_info "ID")-$(get_os_info "VERSION_ID")"
+
 
     exit 0
 }
