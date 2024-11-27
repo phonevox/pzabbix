@@ -35,7 +35,9 @@ declare -A FLAG_TYPES
 declare -A FLAG_DESCRIPTIONS
 declare -A SPECIAL_FLAGS
 declare -A FLAG_HIDDEN
+FLAG_ORDER=() # defaults to the add-order
 
+ORDER_ALPHABETICALLY=false
 FLAG_DEBUG=false
 
 # flag debug message: only log on flag debug enabled
@@ -61,29 +63,28 @@ add_flag() {
     local type=${4:-$DEFAULT_NO_TYPE}
     local hidden_flag=false
 
-
     # arg validation
     if [[ -z "$short_flag" ]]; then
         echo "Error: Short flag cannot be empty."
         exit 1
     fi
 
-    # checking if its a hidden flag
+    # checa se é uma flag escondida
     if [[ "$short_flag" == *":HIDDEN" ]]; then
         FDmsg "Flag  '$short_flag' is hidden."
         short_flag="${short_flag%%:HIDDEN}"
         FLAG_HIDDEN["-$short_flag"]=true
 
-        # arg validation for hidden shorts
+        # validação pra shorts "hidden"
         if [[ -z "$long_flag" ]]; then
             echo "Error: Hidden flag '-$short_flag' requires a long flag."
             exit 1
         fi
     fi
 
-    # standardizing the flag type
+    # normalizando o tipo da flag
     case "$type" in
-        flt|float|str|string) # yes i will treat float as strings, fuck you
+        flt|float|str|string) # sim, vou tratar float como string, exploda
             type="string"
             ;;
         bool|boolean)
@@ -132,6 +133,7 @@ add_flag() {
     FLAG_VALUES["-$short_flag"]=""
     FLAG_TYPES["-$short_flag"]="$type"
     FLAG_DESCRIPTIONS["-$short_flag"]="$description"
+    FLAG_ORDER+=("-$short_flag") # this is idiotic
 }
 
 
@@ -193,6 +195,13 @@ validate_flag_value() {
     return 0
 }
 
+# use através de subshell. as flags estão formatadas como "-<short>" (com o traço)
+# Exemplo prático: for short_flag in $(get_ordered_flags); do; done
+get_ordered_flags() {
+    $ORDER_ALPHABETICALLY && local FLAGS_DISPLAY_COMMAND='printf -- "%s\n" "${FLAG_ORDER[@]}" | sort' || local FLAGS_DISPLAY_COMMAND='printf -- "%s\n" "${FLAG_ORDER[@]}"'
+
+    echo $(eval "$FLAGS_DISPLAY_COMMAND")
+}
 
 # seta uma descrição do app, para ser utilizado no print_usage()
 # não é obrigatório de se utilizar para a aplicação funcionar!
@@ -221,9 +230,8 @@ print_usage() {
     local BOOLEAN="bool"
     declare -A _FLAG_DISPLAY_TEMP
 
-
-    # CALCULATING THE LENGTH
-    for short_flag in "${!FLAGS[@]}"; do
+    # CALCULANDO O TAMANHO
+    for short_flag in $(get_ordered_flags); do
         local long_flag=${FLAGS[$short_flag]}
         local type=${FLAG_TYPES[$short_flag]}
         local is_hidden=$([[ "${FLAG_HIDDEN[$short_flag]}" == true ]] && echo true || echo false)
@@ -242,7 +250,7 @@ print_usage() {
         
         # adds type to display only if not boolean
         if [[ "$type" != "$BOOLEAN" ]]; then
-            local flag_display="$flag_display $type"
+            local flag_display="$flag_display <$type>"
         fi
         
         # updates max length if necessary
@@ -253,8 +261,8 @@ print_usage() {
         _FLAG_DISPLAY_TEMP["$short_flag"]="$flag_display"
     done
 
-    # BUILDING THE ACTUAL DISPLAY, AND MAKING IT ALIGNED
-    for short_flag in "${!FLAGS[@]}"; do
+    # CONSTRUINDO O DISPLAY, ALINHADO COM PRINTF
+    for short_flag in $(get_ordered_flags); do
         # Retrieves pre-formatted display from _FLAG_DISPLAY_TEMP
         local flag_display="${_FLAG_DISPLAY_TEMP[$short_flag]}"
         local description="${FLAG_DESCRIPTIONS["$short_flag"]}"
@@ -466,9 +474,9 @@ checkAllFlags() {
     
     # Define o tamanho padrão para alinhamento
     local max_length=0
-    
+
     # Determina o comprimento máximo de cada linha de flag para o alinhamento
-    for short_flag in "${!FLAGS[@]}"; do
+    for short_flag in $(get_ordered_flags); do
         long_flag=${FLAGS[$short_flag]}
         line_output="$short_flag"
         [[ -n "$long_flag" ]] && line_output="$line_output, --$long_flag"
@@ -478,7 +486,7 @@ checkAllFlags() {
     done
 
     # Ordena as flags e exibe a saída alinhada
-    for short_flag in $(printf "%s\n" "${!FLAGS[@]}" | sort); do
+    for short_flag in $(get_ordered_flags); do
         long_flag=${FLAGS[$short_flag]}
         value=${FLAG_VALUES[$short_flag]}
         type=${FLAG_TYPES[$short_flag]:-boolean}

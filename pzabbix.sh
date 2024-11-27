@@ -28,16 +28,16 @@ add_flag "v" "verbose" "Verbose mode" bool
 # add_flag "brk" "break" "Break mode (ignore restrictions)" bool  # TODO(adrian): implement this later
 
 # Zabbix configuration flags
-add_flag "sa" "server-active" "ServerActive" string
-add_flag "s" "server" "Server" string
-add_flag "S" "S" "ServerActive and Server" string
-add_flag "H" "hostname" "Hostname" string
-add_flag "mtdt" "metadata" "HostMetadata" string
+add_flag "sa" "server-active" "Zabbix: ServerActive" ip/domain
+add_flag "s" "server" "Zabbix: Server" ip/domain
+add_flag "S" "S" "Zabbix: ServerActive and Server" ip/domain
+add_flag "H" "hostname" "Zabbix: Hostname" string
+add_flag "mtdt" "metadata" "Zabbix: HostMetadata, maximum of 255 characters" string
 
 # quick server location
-add_flag "ovh:HIDDEN" "ovh" "Location: OVH" bool
-add_flag "qnax:HIDDEN" "qnax" "Location: QNAX" bool
-add_flag "local:HIDDEN" "local" "Location: Local Server" bool
+add_flag "ovh:HIDDEN" "ovh" "Phonevox: Metadata OVH" bool
+add_flag "qnax:HIDDEN" "qnax" "Phonevox: Metadata QNAX" bool
+add_flag "local:HIDDEN" "local" "Phonevox: Metadata Local Server" bool
 
 set_description "Zabbix installation utilitary made by Phonevox Group Technology"
 parse_flags "$@"
@@ -53,11 +53,21 @@ SYSTEM_OS_VERSION="7"
 ZABBIX_VERSION="5.0"
 ZABBIX_RPM="https://repo.zabbix.com/zabbix/$ZABBIX_VERSION/rhel/$SYSTEM_OS_VERSION/x86_64/zabbix-release-latest.el$SYSTEM_OS_VERSION.noarch.rpm"
 
+ZABBIX_SERVER=""
+ZABBIX_SERVER_ACTIVE=""
+ZABBIX_HOSTNAME=""
+ZABBIX_METADATA=""
+
 # Flag-related configs
 hasFlag "d" && _DRY=true || _DRY=false
 hasFlag "t" && _TEST=true || _TEST=false
 hasFlag "v" && _VERBOSE=true || _VERBOSE=false
 hasFlag "brk" && _BREAK=true || _BREAK=false
+hasFlag "s" && ZABBIX_SERVER=$(getFlag "s")
+hasFlag "sa" && ZABBIX_SERVER_ACTIVE=$(getFlag "sa")
+hasFlag "S" && ZABBIX_SERVER=$(getFlag "S"); ZABBIX_SERVER_ACTIVE=$ZABBIX_SERVER
+hasFlag "H" && ZABBIX_HOSTNAME=$(getFlag "H")
+hasFlag "mtdt" && ZABBIX_METADATA=$(getFlag "mtdt")
 
 (
 $_DRY && (echo "Dry mode is enabled.") || (echo "Dry mode is disabled.")
@@ -146,11 +156,6 @@ function configure_agent() {
     declare -A parameter_exist
     declare -A parameter_value
 
-    # temporary variables
-    local ZABBIX_SERVER="interno.falevox.com.br"
-    local ZABBIX_SERVER_ACTIVE="interno.falevox.com.br"
-    local ZABBIX_HOSTNAME="wasd"
-
     # validates expected files exists
     ! [ -d $ZABBIX_DEFAULT_PATH ] && (echo "ERROR: $ZABBIX_DEFAULT_PATH does not exist" && exit 1) || (echo "ZABBIX_DEFAULT_PATH found")
     ! [ -f $ZABBIX_CONFIG_FILE ] && (echo "ERROR: $ZABBIX_CONFIG_FILE does not exist" && exit 1) || (echo "ZABBIX_CONFIG_FILE found")
@@ -211,27 +216,23 @@ function configure_agent() {
         local PARAMETER=$1
         local VALUE=$2
 
-        _param_check "$PARAMETER"
+        # _param_check "$PARAMETER"
 
         if [[ "${parameter_exist[$PARAMETER]}" == "true" ]]; then
             if [[ "${parameter_value[$PARAMETER]}" != "" ]]; then
                 if ! [ "${parameter_value[$PARAMETER]}" = "$VALUE" ]; then
                     # unexpected value: make it right
-                    echo "unexpected value"
                     sed -i "s~$PARAMETER=${parameter_value[$PARAMETER]}~$PARAMETER=$VALUE~g" $ZABBIX_CONFIG_FILE
                 else
-                    echo "expected value"
                     # expected value: do nothing
                     :
                 fi
             else
-                echo "does not exist or have no value"
                 # param does not exist and have no value: make it right
                 echo "sed -i \"s~$PARAMETER=~$PARAMETER=$VALUE~g\" $ZABBIX_CONFIG_FILE"
             fi
         else
             # param does not exit: add it
-            echo "does not exist"
             echo "$PARAMETER=$VALUE" | tee -a $ZABBIX_CONFIG_FILE
         fi
     }
@@ -245,6 +246,7 @@ function configure_agent() {
         }
 
         # here we add the metadata
+        _metadata_add "$ZABBIX_METADATA"
 
         _metadata_add "os:linux"
 
@@ -260,8 +262,10 @@ function configure_agent() {
         echo $METADATA_CONTENT
     }
 
-    echo $(_metadata_create)
-    _param_set "HostMetadata" "$(_metadata_create)"
+    _param_check "Server"
+    _param_check "ServerActive"
+    _param_check "Hostname"
+    _param_check "HostMetadata"
 
     _param_set "Server" "$ZABBIX_SERVER"
     _param_set "ServerActive" "$ZABBIX_SERVER_ACTIVE"
@@ -279,11 +283,23 @@ function set_zabbix_user_perms() {
     fi
 }
 
+function post_install() {
+    echo "--- POST INSTALL"
+    srun "systemctl restart zabbix-agent"
+    srun "systemctl enable zabbix-agent"
+}
+
 # === RUN TIME ===
 
 function run_test() {
     echo "--- RUNNING TEST"
-    configure_agent
+    
+    echo "Zabbix information: "
+    echo "Server: $ZABBIX_SERVER"
+    echo "ServerActive: $ZABBIX_SERVER_ACTIVE"
+    echo "Hostname: $ZABBIX_HOSTNAME"
+    echo "HostMetadata: $ZABBIX_METADATA"
+
     exit 0
 }
 
@@ -303,13 +319,10 @@ function main() {
     set_zabbix_user_perms
 
     # post install things
-    echo "--- POST INSTALL"
-    srun "systemctl restart zabbix-agent"
-    srun "systemctl enable zabbix-agent"
+    post_install
 
     # goodbye
     echo "--- DONE"
-
     exit 0
 }
 
