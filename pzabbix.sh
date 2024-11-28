@@ -32,9 +32,7 @@ add_flag "H" "hostname" "Zabbix: Hostname" string
 add_flag "m" "metadata" "Zabbix: HostMetadata, maximum of 255 characters" string
 
 # quick server location
-add_flag "ovh:HIDDEN" "ovh" "Phonevox: Metadata OVH" bool
-add_flag "qnax:HIDDEN" "qnax" "Phonevox: Metadata QNAX" bool
-add_flag "local:HIDDEN" "local" "Phonevox: Metadata Local Server" bool
+add_flag "p" "provider" "Phonevox: Server location by Phonevox's lenses (ovh,aws,qnax,local)" string
 
 set_description "Zabbix installation utilitary made by Phonevox Group Technology"
 parse_flags "$@"
@@ -77,6 +75,7 @@ hasFlag "sa" && ZABBIX_SERVER_ACTIVE=$(getFlag "sa") || ZABBIX_SERVER_ACTIVE=$ZA
 hasFlag "S" && ZABBIX_SERVER=$(getFlag "S"); ZABBIX_SERVER_ACTIVE=$ZABBIX_SERVER
 hasFlag "H" && ZABBIX_HOSTNAME=$(getFlag "H")
 hasFlag "m" && ZABBIX_METADATA=$(getFlag "m")
+hasFlag "p" && CLOUD_PROVIDER=$(getFlag "p")
 
 (
 $_DRY && (echo "Dry mode is enabled.") || (echo "Dry mode is disabled.")
@@ -131,47 +130,50 @@ function validate_input() {
     echo "--- VALIDATING INPUT"
 
     if [[ ! "$ZABBIX_SERVER" != "" ]]; then
-        echo "NO ZABBIX SERVER DETECTED"
+        echo "• no zabbix server detected" #this IS required and should be set
+        echo "ERROR: Please set your Zabbix server address"
+        exit 1
     fi
+    echo "$(colorir verde "•") server: $ZABBIX_SERVER"
 
     if [[ ! "$ZABBIX_SERVER_ACTIVE" != "" ]]; then
-        echo "NO ZABBIX SERVER ACTIVE DETECTED"
+        echo "$(colorir vermelho "•") > no active zabbix server detected" #not required
     fi
+    echo "$(colorir verde "•") server active: $ZABBIX_SERVER_ACTIVE"
 
     if [[ ! "$ZABBIX_HOSTNAME" != "" ]]; then
-        echo "No ZABBIX_HOSTNAME detected. Determining..."
 
         # by default always assumes machine-id
-        local PROBABLE_HOSTNAME=$SYSTEM_MACHINE_ID
+        PROBABLE_HOSTNAME=$SYSTEM_MACHINE_ID
 
         # CHORE(adrian): report back if you failed to trust the detected provider's hostname!
         if [[ "$CLOUD_PROVIDER" == "ovh" ]]; then
-            echo "OVH Provider detected. Trying to determine hostname"
+            echo "• OVH cloud detected."
             PROBABLE_HOSTNAME=$(echo $SYSTEM_HOSTNAME | grep -oE "^vps-[a-z0-9]+") # vps-da2bcebf
             PROBABLE_HOSTNAME_CHARCOUNT=$(echo -n $PROBABLE_HOSTNAME | wc -c)
             [[ ! "$PROBABLE_HOSTNAME_CHARCOUNT" -eq 12 ]] && ZABBIX_HOSTNAME=$PROBABLE_HOSTNAME
 
         elif [[ "$CLOUD_PROVIDER" == "qnax" ]]; then
-            echo "QNax Provider detected. Trying to determine hostname"
+            echo "• QNax cloud detected."
             PROBABLE_HOSTNAME=$(echo $SYSTEM_HOSTNAME | grep -oE "^SRV-[0-9]+$") # SRV-1699030926
             PROBABLE_HOSTNAME_CHARCOUNT=$(echo -n $PROBABLE_HOSTNAME | wc -c)
             [[ "$PROBABLE_HOSTNAME_CHARCOUNT" -eq 14 ]] && ZABBIX_HOSTNAME=$PROBABLE_HOSTNAME
 
         # elif [[ "$CLOUD_PROVIDER" == "aws" ]]; then
         else
-            echo "Unknown provider. Assuming local machine, with machine-id as hostname."
-            # redundant to write here
+            echo "$(colorir laranja "•") > no cloud provider detected. assuming local machine"
+            PROBABLE_HOSTNAME=$SYSTEM_MACHINE_ID
+        fi
+
+        # cloudprovider hostname detection failed, assume machine-id and inform user
+        if [[ "$CLOUD_PROVIDER" != "local" && "$PROBABLE_HOSTNAME" == "$MACHINE_ID" ]]; then
+            echo "$(colorir vermelho "•") > could not determine cloud provider hostname, assuming machine-id"
+            PROBABLE_HOSTNAME=$SYSTEM_MACHINE_ID
         fi
 
         ZABBIX_HOSTNAME=$PROBABLE_HOSTNAME
-
-        echo "MACHINE_ID: $SYSTEM_MACHINE_ID"
-        echo "HOSTNAME: $SYSTEM_HOSTNAME"
-        echo "PROVIDER: $CLOUD_PROVIDER"
-        echo "PROBABLE_HOSTNAME: $PROBABLE_HOSTNAME"
-        echo "ZABBIX_HOSTNAME: $ZABBIX_HOSTNAME"
-
     fi
+    echo "$(colorir verde "•") hostname: $PROBABLE_HOSTNAME"
 
 }
 
@@ -293,19 +295,23 @@ function _metadata_create() {
         METADATA_CONTENT+="$NEW_METADATA "
     }
 
-    # here we add the metadata
-    _metadata_append "$ZABBIX_METADATA"
+    # NOTE(adrian): if you need more characters for metadata content
+    # try making the default information smaller like: os:1 os:2 os:3 and 
+    # map those to "windows, linux, macos" on zabbix autoreg
 
+    # default metadata
+    _metadata_append "l:$CLOUD_PROVIDER"
     _metadata_append "os:linux"
-
     _metadata_append "osn:$SYSTEM_OS"
 
+    # dependant metadata (depends on other things existing in the system)
     if [[ ! -z "$ASTERISK_VERSION" ]]; then
         # has asterisk. here should be all the metadata related to his asterisk thing
         _metadata_append "av:$ASTERISK_VERSION"
     fi
 
-    _metadata_append "l:$CLOUD_PROVIDER"
+    # user metadata. should be the last thing, because it can exceed the 255 char limit
+    _metadata_append "$ZABBIX_METADATA"
 
     if [[ ${#METADATA_CONTENT} -gt 255 ]]; then
         exit 1
@@ -364,6 +370,8 @@ function run_test() {
     echo "        Hostname : $ZABBIX_HOSTNAME"
     echo "    HostMetadata : $ZABBIX_METADATA"
     echo "_metadata_create : $(_metadata_create)"
+    echo "  Cloud Provider : $CLOUD_PROVIDER"
+    echo "Asterisk Version : $ASTERISK_VERSION"
     # echo "              OS : $(get_os)"
     # echo "         OS INFO : $(get_os_info "ID")-$(get_os_info "VERSION_ID")"
     echo ""
