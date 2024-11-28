@@ -10,7 +10,7 @@ REPO_OWNER="phonevox"
 REPO_NAME="pzabbix"
 REPO_URL="https://github.com/$REPO_OWNER/$REPO_NAME"
 ZIP_URL="$REPO_URL/archive/refs/heads/main.zip"
-APP_VERSION="v0.1.0"
+APP_VERSION="v0.1.1"
 
 source $CURRDIR/lib/useful.sh
 source $CURRDIR/lib/easyflags.sh
@@ -22,7 +22,6 @@ source $CURRDIR/lib/versioncontrol.sh
 add_flag "d" "dry" "Do NOT make changes to the system" bool
 add_flag "t" "test" "Test mode" bool
 add_flag "v" "verbose" "Verbose mode" bool
-# add_flag "brk" "break" "Break mode (ignore restrictions)" bool  # TODO(adrian): implement this later
 
 # Zabbix configuration flags
 add_flag "sa" "server-active" "Zabbix: ServerActive" ip/domain
@@ -30,9 +29,12 @@ add_flag "s" "server" "Zabbix: Server" ip/domain
 add_flag "S" "S" "Zabbix: ServerActive and Server" ip/domain
 add_flag "H" "hostname" "Zabbix: Hostname" string
 add_flag "m" "metadata" "Zabbix: HostMetadata, maximum of 255 characters" string
-
-# quick server location
 add_flag "p" "provider" "Phonevox: Server location by Phonevox's lenses (ovh,aws,qnax,local)" string
+
+# script versioning
+add_flag "V" "version" "Show the script version" bool
+add_flag "U:HIDDEN" "update" "Update the script to the latest version" bool
+add_flag "FU:HIDDEN" "force-update" "Forcefully updates the script to the latest version" bool
 
 set_description "Zabbix installation utilitary made by Phonevox Group Technology"
 parse_flags "$@"
@@ -69,19 +71,14 @@ ZABBIX_METADATA=""
 hasFlag "d" && _DRY=true || _DRY=false
 hasFlag "t" && _TEST=true || _TEST=false
 hasFlag "v" && _VERBOSE=true || _VERBOSE=false
-hasFlag "brk" && _BREAK=true || _BREAK=false
+hasFlag "U" && _UPDATE=true || _UPDATE=false
+hasFlag "FU" && _FORCE_UPDATE=true || _FORCE_UPDATE=false
 hasFlag "s" && ZABBIX_SERVER=$(getFlag "s")
 hasFlag "sa" && ZABBIX_SERVER_ACTIVE=$(getFlag "sa") || ZABBIX_SERVER_ACTIVE=$ZABBIX_SERVER
 hasFlag "S" && ZABBIX_SERVER=$(getFlag "S"); ZABBIX_SERVER_ACTIVE=$ZABBIX_SERVER
 hasFlag "H" && ZABBIX_HOSTNAME=$(getFlag "H")
 hasFlag "m" && ZABBIX_METADATA=$(getFlag "m")
 hasFlag "p" && CLOUD_PROVIDER=$(getFlag "p")
-
-(
-$_DRY && (echo "Dry mode is enabled.") || (echo "Dry mode is disabled.")
-$_TEST && (echo "Test mode is enabled.") || (echo "Test mode is disabled.")
-$_VERBOSE && (echo "Verbose mode is enabled.") || (echo "Verbose mode is disabled.")
-) > /dev/null # temporarily mute this :)
 
 # === THINGS ===
 
@@ -381,7 +378,11 @@ function run_test() {
 }
 
 function main() {
+    $_DRY && (echo "Dry mode is enabled.") || (echo "Dry mode is disabled.")
+    $_TEST && (echo "Test mode is enabled.") || (echo "Test mode is disabled.")
+    $_VERBOSE && (echo "Verbose mode is enabled.") || (echo "Verbose mode is disabled.")
     $_TEST && run_test
+    $_UPDATE && check_for_updates
 
     # confirm user input
     validate_input

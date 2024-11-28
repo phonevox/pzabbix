@@ -24,7 +24,7 @@ function check_for_updates() {
     # its the same version
     if ! version_is_greater "$LATEST_VERSION" "$CURRENT_VERSION"; then
         echo "$(colorir verde "You are using the latest version. ($CURRENT_VERSION)")"
-        if ! $FORCE_UPDATE; then exit 1; fi
+        if ! $_FORCE_UPDATE; then exit 1; fi
     else
         echo "You are not using the latest version. (CURRENT: '$CURRENT_VERSION', LATEST: '$LATEST_VERSION')"
     fi
