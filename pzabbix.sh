@@ -52,7 +52,6 @@ ZABBIX_DEFAULT_PATH="/etc/zabbix"
 ZABBIX_CONFIG_FILE="$ZABBIX_DEFAULT_PATH/$ZABBIX_CONFIG_FILE_NAME"
 
 ZABBIX_VERSION="5.0"
-ZABBIX_RPM="https://repo.zabbix.com/zabbix/$ZABBIX_VERSION/rhel/$SYSTEM_OS_VERSION/x86_64/zabbix-release-latest.el$SYSTEM_OS_VERSION.noarch.rpm"
 
 ZABBIX_SERVER=""
 ZABBIX_SERVER_ACTIVE=""
@@ -76,11 +75,13 @@ hasFlag "p" && CLOUD_PROVIDER=$(getFlag "p")
 # Additional information from system
 SYSTEM_OS_ID=$(get_os_info "ID") #centos|rocky|debian|ubuntu
 SYSTEM_OS_VERSION=$(get_os_info "VERSION_ID") # 7|8.0|18|22 etc... (version number)
+SYSTEM_OS_VERSION_MAJOR=$(echo $SYSTEM_OS_VERSION | awk -F. '{print $1}') # 7|8|18|22 etc... (major version number)
 SYSTEM_OS="$SYSTEM_OS_ID-$SYSTEM_OS_VERSION" # centos-7|rocky-8.0 etc...
 SYSTEM_HOSTNAME=$(hostname)
 SYSTEM_MACHINE_ID=$(cat /etc/machine-id)
 ASTERISK_VERSION=$(asterisk -V | awk -F"Asterisk " '{print $2}') # integer
 CLOUD_PROVIDER=$(determine_cloud_provider)
+ZABBIX_RPM="https://repo.zabbix.com/zabbix/$ZABBIX_VERSION/rhel/$SYSTEM_OS_VERSION_MAJOR/x86_64/zabbix-release-latest.el$SYSTEM_OS_VERSION_MAJOR.noarch.rpm"
 
 # === THINGS ===
 
