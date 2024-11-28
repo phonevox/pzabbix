@@ -54,6 +54,8 @@ declare -A parameter_value
 SYSTEM_OS_ID=$(get_os_info "ID") #centos|rocky|debian|ubuntu
 SYSTEM_OS_VERSION=$(get_os_info "VERSION_ID") # 7|8.0|18|22 etc... (version number)
 SYSTEM_OS="$SYSTEM_OS_ID-$SYSTEM_OS_VERSION" # centos-7|rocky-8.0 etc...
+SYSTEM_HOSTNAME=$(hostname)
+SYSTEM_MACHINE_ID=$(cat /etc/machine-id)
 ASTERISK_VERSION=$(asterisk -V | awk -F"Asterisk " '{print $2}') # integer
 CLOUD_PROVIDER=$(determine_cloud_provider)
 
@@ -139,31 +141,32 @@ function validate_input() {
     if [[ ! "$ZABBIX_HOSTNAME" != "" ]]; then
         echo "No ZABBIX_HOSTNAME detected. Determining..."
 
-        MACHINE_ID=$(cat /etc/machine-id)
-        ZABBIX_HOSTNAME=$MACHINE_ID
-        HOSTNAME=$(hostname)
-        local PROBABLE_HOSTNAME=""
+        # by default always assumes machine-id
+        local PROBABLE_HOSTNAME=$SYSTEM_MACHINE_ID
 
         # CHORE(adrian): report back if you failed to trust the detected provider's hostname!
         if [[ "$CLOUD_PROVIDER" == "ovh" ]]; then
             echo "OVH Provider detected. Trying to determine hostname"
-            PROBABLE_HOSTNAME=$(echo $HOSTNAME | grep -oE "^vps-[a-z0-9]+") # vps-da2bcebf
+            PROBABLE_HOSTNAME=$(echo $SYSTEM_HOSTNAME | grep -oE "^vps-[a-z0-9]+") # vps-da2bcebf
             PROBABLE_HOSTNAME_CHARCOUNT=$(echo -n $PROBABLE_HOSTNAME | wc -c)
             [[ ! "$PROBABLE_HOSTNAME_CHARCOUNT" -eq 12 ]] && ZABBIX_HOSTNAME=$PROBABLE_HOSTNAME
 
         elif [[ "$CLOUD_PROVIDER" == "qnax" ]]; then
             echo "QNax Provider detected. Trying to determine hostname"
-            PROBABLE_HOSTNAME=$(echo $HOSTNAME | grep -oE "^SRV-[0-9]+$") # SRV-1699030926
+            PROBABLE_HOSTNAME=$(echo $SYSTEM_HOSTNAME | grep -oE "^SRV-[0-9]+$") # SRV-1699030926
             PROBABLE_HOSTNAME_CHARCOUNT=$(echo -n $PROBABLE_HOSTNAME | wc -c)
             [[ "$PROBABLE_HOSTNAME_CHARCOUNT" -eq 14 ]] && ZABBIX_HOSTNAME=$PROBABLE_HOSTNAME
 
         # elif [[ "$CLOUD_PROVIDER" == "aws" ]]; then
         else
             echo "Unknown provider. Assuming local machine, with machine-id as hostname."
+            # redundant to write here
         fi
 
-        echo "MACHINE_ID: $MACHINE_ID"
-        echo "HOSTNAME: $HOSTNAME"
+        ZABBIX_HOSTNAME=$PROBABLE_HOSTNAME
+
+        echo "MACHINE_ID: $SYSTEM_MACHINE_ID"
+        echo "HOSTNAME: $SYSTEM_HOSTNAME"
         echo "PROVIDER: $CLOUD_PROVIDER"
         echo "PROBABLE_HOSTNAME: $PROBABLE_HOSTNAME"
         echo "ZABBIX_HOSTNAME: $ZABBIX_HOSTNAME"
