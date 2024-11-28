@@ -10,7 +10,7 @@ REPO_OWNER="phonevox"
 REPO_NAME="pzabbix"
 REPO_URL="https://github.com/$REPO_OWNER/$REPO_NAME"
 ZIP_URL="$REPO_URL/archive/refs/heads/main.zip"
-APP_VERSION="v0.1.1"
+APP_VERSION="v0.1.2"
 
 source $CURRDIR/lib/useful.sh
 source $CURRDIR/lib/easyflags.sh
@@ -42,22 +42,14 @@ parse_flags "$@"
 # === FLAGS PARSED ===
 
 
-# Script-related variables
-ZABBIX_CONFIG_FILE_NAME="zabbix_agentd.conf"
-ZABBIX_DEFAULT_PATH="/etc/zabbix"
-ZABBIX_CONFIG_FILE="$ZABBIX_DEFAULT_PATH/$ZABBIX_CONFIG_FILE_NAME"
-# For zabbix param checks
+# Used in Zabbix param checking (on file configuration)
 declare -A parameter_exist
 declare -A parameter_value
 
-# Additional information
-SYSTEM_OS_ID=$(get_os_info "ID") #centos|rocky|debian|ubuntu
-SYSTEM_OS_VERSION=$(get_os_info "VERSION_ID") # 7|8.0|18|22 etc... (version number)
-SYSTEM_OS="$SYSTEM_OS_ID-$SYSTEM_OS_VERSION" # centos-7|rocky-8.0 etc...
-SYSTEM_HOSTNAME=$(hostname)
-SYSTEM_MACHINE_ID=$(cat /etc/machine-id)
-ASTERISK_VERSION=$(asterisk -V | awk -F"Asterisk " '{print $2}') # integer
-CLOUD_PROVIDER=$(determine_cloud_provider)
+# Zabbix-related variables
+ZABBIX_CONFIG_FILE_NAME="zabbix_agentd.conf"
+ZABBIX_DEFAULT_PATH="/etc/zabbix"
+ZABBIX_CONFIG_FILE="$ZABBIX_DEFAULT_PATH/$ZABBIX_CONFIG_FILE_NAME"
 
 ZABBIX_VERSION="5.0"
 ZABBIX_RPM="https://repo.zabbix.com/zabbix/$ZABBIX_VERSION/rhel/$SYSTEM_OS_VERSION/x86_64/zabbix-release-latest.el$SYSTEM_OS_VERSION.noarch.rpm"
@@ -68,6 +60,7 @@ ZABBIX_HOSTNAME=""
 ZABBIX_METADATA=""
 
 # Flag-related configs
+if hasFlag "V"; then echo "$APP_VERSION"; exit 0; fi
 hasFlag "d" && _DRY=true || _DRY=false
 hasFlag "t" && _TEST=true || _TEST=false
 hasFlag "v" && _VERBOSE=true || _VERBOSE=false
@@ -79,6 +72,15 @@ hasFlag "S" && ZABBIX_SERVER=$(getFlag "S"); ZABBIX_SERVER_ACTIVE=$ZABBIX_SERVER
 hasFlag "H" && ZABBIX_HOSTNAME=$(getFlag "H")
 hasFlag "m" && ZABBIX_METADATA=$(getFlag "m")
 hasFlag "p" && CLOUD_PROVIDER=$(getFlag "p")
+
+# Additional information from system
+SYSTEM_OS_ID=$(get_os_info "ID") #centos|rocky|debian|ubuntu
+SYSTEM_OS_VERSION=$(get_os_info "VERSION_ID") # 7|8.0|18|22 etc... (version number)
+SYSTEM_OS="$SYSTEM_OS_ID-$SYSTEM_OS_VERSION" # centos-7|rocky-8.0 etc...
+SYSTEM_HOSTNAME=$(hostname)
+SYSTEM_MACHINE_ID=$(cat /etc/machine-id)
+ASTERISK_VERSION=$(asterisk -V | awk -F"Asterisk " '{print $2}') # integer
+CLOUD_PROVIDER=$(determine_cloud_provider)
 
 # === THINGS ===
 
