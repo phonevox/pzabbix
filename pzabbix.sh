@@ -10,7 +10,7 @@ REPO_OWNER="phonevox"
 REPO_NAME="pzabbix"
 REPO_URL="https://github.com/$REPO_OWNER/$REPO_NAME"
 ZIP_URL="$REPO_URL/archive/refs/heads/main.zip"
-APP_VERSION="v0.1.2"
+APP_VERSION="v0.1.3"
 
 source $CURRDIR/lib/useful.sh
 source $CURRDIR/lib/easyflags.sh
