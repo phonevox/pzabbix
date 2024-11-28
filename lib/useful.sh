@@ -60,6 +60,29 @@ function get_os_info() {
     echo "$(echo $(grep -oP "(?<=^$FIELD=).+" /etc/os-release | tr -d '"'))"
 }
 
+# this is mostly related to phonevox
+# manual mapping of cloud providers
+# call in subshell and store the echo'ed value in a variable
+# usage: CLOUD_PROVIDER=$(determine_provider)
+function determine_cloud_provider() {
+    local PROBABLE_PROVIDER="local"
+
+    # checking ovh provider
+    # hostname | grep -qi "vps\.ovh" && local PROBABLE_PROVIDER="ovh" # lets not trust the hostname, shall we
+    curl -s https://ipinfo.io/json | grep -i org | grep -qi OVH && local PROBABLE_PROVIDER="ovh" # via ipinfo
+
+    # checking for qnax provider
+    # hostname | grep -qE "SRV-[0-9]+" && local PROBABLE_PROVIDER="qnax" # lets not trust the hostname, shall we
+    curl -s https://ipinfo.io/json | grep -i org | grep -qi QNAX && local PROBABLE_PROVIDER="qnax" # via ipinfo
+
+    # checking for aws
+    # idk what to grep for hostname search on aws. they have a lot of servers iirc
+    curl -s https://ipinfo.io/json | grep -i org | grep -qi Amazon && local PROBABLE_PROVIDER="aws" # via ipinfo
+
+    echo $PROBABLE_PROVIDER
+}
+
+
 # color your text using subshells
 # this needs the COLORS_ARRAY array, declared outside this function
 # Usage: echo "esse texto está sem cor, mas $(colorir "verde" "esse texto aqui está com cor") "

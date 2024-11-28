@@ -16,11 +16,6 @@ source $CURRDIR/lib/useful.sh
 source $CURRDIR/lib/easyflags.sh
 source $CURRDIR/lib/versioncontrol.sh
 
-# Additional information
-SYSTEM_ID=$(get_os_info "ID") #centos|rocky|debian|ubuntu
-SYSTEM_VERSION=$(get_os_info "VERSION_ID") # 7|8.0|18|22 etc... (version number)
-SYSTEM_OS="$SYSTEM_ID-$SYSTEM_VERSION" # centos-7|rocky-8.0 etc...
-
 # === FLAGS BELOW ===
 
 # General flags
@@ -46,12 +41,22 @@ parse_flags "$@"
 
 # === FLAGS PARSED ===
 
+
 # Script-related variables
 ZABBIX_CONFIG_FILE_NAME="zabbix_agentd.conf"
 ZABBIX_DEFAULT_PATH="/etc/zabbix"
 ZABBIX_CONFIG_FILE="$ZABBIX_DEFAULT_PATH/$ZABBIX_CONFIG_FILE_NAME"
+# For zabbix param checks
+declare -A parameter_exist
+declare -A parameter_value
 
-SYSTEM_OS_VERSION="7"
+# Additional information
+SYSTEM_OS_ID=$(get_os_info "ID") #centos|rocky|debian|ubuntu
+SYSTEM_OS_VERSION=$(get_os_info "VERSION_ID") # 7|8.0|18|22 etc... (version number)
+SYSTEM_OS="$SYSTEM_OS_ID-$SYSTEM_OS_VERSION" # centos-7|rocky-8.0 etc...
+ASTERISK_VERSION=$(asterisk -V | awk -F"Asterisk " '{print $2}') # integer
+CLOUD_PROVIDER=$(determine_cloud_provider)
+
 ZABBIX_VERSION="5.0"
 ZABBIX_RPM="https://repo.zabbix.com/zabbix/$ZABBIX_VERSION/rhel/$SYSTEM_OS_VERSION/x86_64/zabbix-release-latest.el$SYSTEM_OS_VERSION.noarch.rpm"
 
@@ -66,7 +71,7 @@ hasFlag "t" && _TEST=true || _TEST=false
 hasFlag "v" && _VERBOSE=true || _VERBOSE=false
 hasFlag "brk" && _BREAK=true || _BREAK=false
 hasFlag "s" && ZABBIX_SERVER=$(getFlag "s")
-hasFlag "sa" && ZABBIX_SERVER_ACTIVE=$(getFlag "sa")
+hasFlag "sa" && ZABBIX_SERVER_ACTIVE=$(getFlag "sa") || ZABBIX_SERVER_ACTIVE=$ZABBIX_SERVER
 hasFlag "S" && ZABBIX_SERVER=$(getFlag "S"); ZABBIX_SERVER_ACTIVE=$ZABBIX_SERVER
 hasFlag "H" && ZABBIX_HOSTNAME=$(getFlag "H")
 hasFlag "m" && ZABBIX_METADATA=$(getFlag "m")
@@ -122,6 +127,49 @@ function zabbix_valid_hostname() {
 
 function validate_input() {
     echo "--- VALIDATING INPUT"
+
+    if [[ ! "$ZABBIX_SERVER" != "" ]]; then
+        echo "NO ZABBIX SERVER DETECTED"
+    fi
+
+    if [[ ! "$ZABBIX_SERVER_ACTIVE" != "" ]]; then
+        echo "NO ZABBIX SERVER ACTIVE DETECTED"
+    fi
+
+    if [[ ! "$ZABBIX_HOSTNAME" != "" ]]; then
+        echo "No ZABBIX_HOSTNAME detected. Determining..."
+
+        MACHINE_ID=$(cat /etc/machine-id)
+        ZABBIX_HOSTNAME=$MACHINE_ID
+        HOSTNAME=$(hostname)
+        local PROBABLE_HOSTNAME=""
+
+        # CHORE(adrian): report back if you failed to trust the detected provider's hostname!
+        if [[ "$CLOUD_PROVIDER" == "ovh" ]]; then
+            echo "OVH Provider detected. Trying to determine hostname"
+            PROBABLE_HOSTNAME=$(echo $HOSTNAME | grep -oE "^vps-[a-z0-9]+") # vps-da2bcebf
+            PROBABLE_HOSTNAME_CHARCOUNT=$(echo -n $PROBABLE_HOSTNAME | wc -c)
+            [[ ! "$PROBABLE_HOSTNAME_CHARCOUNT" -eq 12 ]] && ZABBIX_HOSTNAME=$PROBABLE_HOSTNAME
+
+        elif [[ "$CLOUD_PROVIDER" == "qnax" ]]; then
+            echo "QNax Provider detected. Trying to determine hostname"
+            PROBABLE_HOSTNAME=$(echo $HOSTNAME | grep -oE "^SRV-[0-9]+$") # SRV-1699030926
+            PROBABLE_HOSTNAME_CHARCOUNT=$(echo -n $PROBABLE_HOSTNAME | wc -c)
+            [[ "$PROBABLE_HOSTNAME_CHARCOUNT" -eq 14 ]] && ZABBIX_HOSTNAME=$PROBABLE_HOSTNAME
+
+        # elif [[ "$CLOUD_PROVIDER" == "aws" ]]; then
+        else
+            echo "Unknown provider. Assuming local machine, with machine-id as hostname."
+        fi
+
+        echo "MACHINE_ID: $MACHINE_ID"
+        echo "HOSTNAME: $HOSTNAME"
+        echo "PROVIDER: $CLOUD_PROVIDER"
+        echo "PROBABLE_HOSTNAME: $PROBABLE_HOSTNAME"
+        echo "ZABBIX_HOSTNAME: $ZABBIX_HOSTNAME"
+
+    fi
+
 }
 
 function install_agent() {
@@ -153,116 +201,124 @@ function install_agent() {
     srun "sudo systemctl start zabbix-agent"
 }
 
+# v RELATED TO configure_agent
+
+# checks if parameter exists, is duplicate, etc..
+# usage: _param_check "<zabbix_parameter>"
+function _param_check() {
+    local PARAMETER=$1
+
+    function _param_has_duplicate() {
+        # this func adds info to associative-array 'parameter_exist'
+        local PARAMETER=$1
+        local QTY_MATCH_LINES=$(cat $ZABBIX_CONFIG_FILE | grep -I "^$PARAMETER=" | wc -l)
+
+        [[ $QTY_MATCH_LINES > 1 ]] && return 0
+        [[ $QTY_MATCH_LINES < 1 ]] && (parameter_exist[$PARAMETER]+=false) || (parameter_exist[$PARAMETER]+=true)
+        return 1
+    }
+
+    function _param_is_empty() {
+        local PARAMETER=$1
+        local PARAMETER_VALUE=$(cat $ZABBIX_CONFIG_FILE | grep -i "^$PARAMETER=" | awk -F"$PARAMETER=" '{print $2}')
+
+        if [[ -z "$PARAMETER_VALUE" ]]; then return 0; fi # no value on param. return
+        
+        # some value on param, save and return
+        parameter_value[$PARAMETER]+=$PARAMETER_VALUE
+        return 1
+
+    }
+
+    if _param_has_duplicate "$PARAMETER"; then
+        echo "ERROR: Parameter $PARAMETER is duplicated."
+        exit 1
+    fi
+
+    if ! _param_is_empty "$PARAMETER"; then
+        echo "INFO: Parameter $PARAMETER has value '${parameter_value[$PARAMETER]}'"
+    else
+        # debug tbh, doesnt really matter
+        if [[ "${parameter_exist[$PARAMETER]}" == "true" ]]; then
+            echo "INFO: Parameter $PARAMETER is empty"
+        else
+            echo "INFO: Parameter $PARAMETER is not set"
+        fi
+    fi
+    
+    return 0
+
+
+
+}
+
+# sets a value to the parameter
+# case-sensitive on parameter name
+# usage: _param_set "<zabbix_parameter>" "<value>"
+function _param_set() {
+    local PARAMETER=$1
+    local VALUE=$2
+
+    # _param_check "$PARAMETER"
+
+    if [[ "${parameter_exist[$PARAMETER]}" == "true" ]]; then
+        if [[ "${parameter_value[$PARAMETER]}" != "" ]]; then
+            if ! [ "${parameter_value[$PARAMETER]}" = "$VALUE" ]; then
+                # unexpected value: make it right
+                sed -i "s~$PARAMETER=${parameter_value[$PARAMETER]}~$PARAMETER=$VALUE~g" $ZABBIX_CONFIG_FILE
+            else
+                # expected value: do nothing
+                :
+            fi
+        else
+            # param does not exist and have no value: make it right
+            echo "sed -i \"s~$PARAMETER=~$PARAMETER=$VALUE~g\" $ZABBIX_CONFIG_FILE"
+        fi
+    else
+        # param does not exit: add it
+        echo "$PARAMETER=$VALUE" | tee -a $ZABBIX_CONFIG_FILE
+    fi
+}
+
+# prepares the metadata content
+# use in subshell
+# usage: metadata=$(_metadata_create)
+function _metadata_create() {
+    local METADATA_CONTENT=""
+    function _metadata_append() {
+        local NEW_METADATA=$1
+        METADATA_CONTENT+="$NEW_METADATA "
+    }
+
+    # here we add the metadata
+    _metadata_append "$ZABBIX_METADATA"
+
+    _metadata_append "os:linux"
+
+    _metadata_append "osn:$SYSTEM_OS"
+
+    if [[ ! -z "$ASTERISK_VERSION" ]]; then
+        # has asterisk. here should be all the metadata related to his asterisk thing
+        _metadata_append "av:$ASTERISK_VERSION"
+    fi
+
+    _metadata_append "l:$CLOUD_PROVIDER"
+
+    if [[ ${#METADATA_CONTENT} -gt 255 ]]; then
+        exit 1
+    fi
+
+    echo $METADATA_CONTENT
+}
+
+# ^ RELATED TO configure_agent
+
 function configure_agent() {
     echo "--- EDITING ZABBIX CONFIGURATION"
-    declare -A parameter_exist
-    declare -A parameter_value
 
     # validates expected files exists
     ! [ -d $ZABBIX_DEFAULT_PATH ] && (echo "ERROR: $ZABBIX_DEFAULT_PATH does not exist" && exit 1) || (echo "ZABBIX_DEFAULT_PATH found")
     ! [ -f $ZABBIX_CONFIG_FILE ] && (echo "ERROR: $ZABBIX_CONFIG_FILE does not exist" && exit 1) || (echo "ZABBIX_CONFIG_FILE found")
-
-    # checks if parameter exists, is duplicate, etc..
-    # usage: _param_check "<zabbix_parameter>"
-    _param_check() {
-        local PARAMETER=$1
-
-        _param_has_duplicate() {
-            # this func adds info to associative-array 'parameter_exist'
-            local PARAMETER=$1
-            local QTY_MATCH_LINES=$(cat $ZABBIX_CONFIG_FILE | grep -I "^$PARAMETER=" | wc -l)
-
-            [[ $QTY_MATCH_LINES > 1 ]] && return 0
-            [[ $QTY_MATCH_LINES < 1 ]] && (parameter_exist[$PARAMETER]+=false) || (parameter_exist[$PARAMETER]+=true)
-            return 1
-        }
-
-        _param_is_empty() {
-            local PARAMETER=$1
-            local PARAMETER_VALUE=$(cat $ZABBIX_CONFIG_FILE | grep -i "^$PARAMETER=" | awk -F"$PARAMETER=" '{print $2}')
-
-            if [[ -z "$PARAMETER_VALUE" ]]; then return 0; fi # no value on param. return
-            
-            # some value on param, save and return
-            parameter_value[$PARAMETER]+=$PARAMETER_VALUE
-            return 1
-
-        }
-
-        if _param_has_duplicate "$PARAMETER"; then
-            echo "ERROR: Parameter $PARAMETER is duplicated."
-            exit 1
-        fi
-
-        if ! _param_is_empty "$PARAMETER"; then
-            echo "INFO: Parameter $PARAMETER has value '${parameter_value[$PARAMETER]}'"
-        else
-            # debug tbh, doesnt really matter
-            if [[ "${parameter_exist[$PARAMETER]}" == "true" ]]; then
-                echo "INFO: Parameter $PARAMETER is empty"
-            else
-                echo "INFO: Parameter $PARAMETER is not set"
-            fi
-        fi
-        
-        return 0
-
-
-
-    }
-
-    # sets a value to the parameter
-    # case-sensitive on parameter name
-    # usage: _param_set "<zabbix_parameter>" "<value>"
-    _param_set() {
-        local PARAMETER=$1
-        local VALUE=$2
-
-        # _param_check "$PARAMETER"
-
-        if [[ "${parameter_exist[$PARAMETER]}" == "true" ]]; then
-            if [[ "${parameter_value[$PARAMETER]}" != "" ]]; then
-                if ! [ "${parameter_value[$PARAMETER]}" = "$VALUE" ]; then
-                    # unexpected value: make it right
-                    sed -i "s~$PARAMETER=${parameter_value[$PARAMETER]}~$PARAMETER=$VALUE~g" $ZABBIX_CONFIG_FILE
-                else
-                    # expected value: do nothing
-                    :
-                fi
-            else
-                # param does not exist and have no value: make it right
-                echo "sed -i \"s~$PARAMETER=~$PARAMETER=$VALUE~g\" $ZABBIX_CONFIG_FILE"
-            fi
-        else
-            # param does not exit: add it
-            echo "$PARAMETER=$VALUE" | tee -a $ZABBIX_CONFIG_FILE
-        fi
-    }
-
-    # prepares the metadata content
-    _metadata_create() {
-        local METADATA_CONTENT=""
-        _metadata_add() {
-            local NEW_METADATA=$1
-            METADATA_CONTENT+="$NEW_METADATA "
-        }
-
-        # here we add the metadata
-        _metadata_add "$ZABBIX_METADATA"
-
-        _metadata_add "os:linux"
-
-        # os (linux/windows)
-        # os id+version
-        # asterisk version
-        # special metadata from user
-
-        if [[ ${#METADATA_CONTENT} -gt 255 ]]; then
-            exit 1
-        fi
-
-        echo $METADATA_CONTENT
-    }
 
     _param_check "Server"
     _param_check "ServerActive"
@@ -296,13 +352,18 @@ function post_install() {
 function run_test() {
     echo "--- RUNNING TEST"
     
-    echo "    --- Zabbix information --- "
-    echo "Server        : $ZABBIX_SERVER"
-    echo "ServerActive  : $ZABBIX_SERVER_ACTIVE"
-    echo "Hostname      : $ZABBIX_HOSTNAME"
-    echo "HostMetadata  : $ZABBIX_METADATA"
-    echo "OS            : $(get_os)"
-    echo "OS INFO       : $(get_os_info "ID")-$(get_os_info "VERSION_ID")"
+    echo -e "\n\n"
+    validate_input
+    echo ""
+    echo "       --- Zabbix information --- "
+    echo "          Server : $ZABBIX_SERVER"
+    echo "    ServerActive : $ZABBIX_SERVER_ACTIVE"
+    echo "        Hostname : $ZABBIX_HOSTNAME"
+    echo "    HostMetadata : $ZABBIX_METADATA"
+    echo "_metadata_create : $(_metadata_create)"
+    # echo "              OS : $(get_os)"
+    # echo "         OS INFO : $(get_os_info "ID")-$(get_os_info "VERSION_ID")"
+    echo ""
 
 
     exit 0
